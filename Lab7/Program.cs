@@ -1,3 +1,5 @@
+#:property PublishAot=false
+
 using System.Numerics;
 using static Algorithms;
 
@@ -86,4 +88,72 @@ static void PrintGroups<T, TKey>(string title, Dictionary<TKey, List<T>> groups)
     Console.WriteLine(title);
     foreach (var group in groups)
         Console.WriteLine($"  {group.Key}: {group.Value.Count}");
+}
+
+static class Algorithms
+{
+    public static List<T> Filter<T>(List<T> source, Func<T, bool> keep)
+    {
+        var result = new List<T>();
+        foreach (T item in source)
+            if (keep(item))
+                result.Add(item);
+        return result;
+    }
+
+    public static List<TOut> Map<TIn, TOut>(List<TIn> source, Func<TIn, TOut> convert)
+    {
+        var result = new List<TOut>(source.Count);
+        foreach (TIn item in source)
+            result.Add(convert(item));
+        return result;
+    }
+
+    public static TAcc Aggregate<T, TAcc>(List<T> source, TAcc start, Func<TAcc, T, TAcc> step)
+    {
+        foreach (T item in source)
+            start = step(start, item);
+        return start;
+    }
+
+    public static Dictionary<TKey, List<T>> GroupBy<T, TKey>(List<T> source, Func<T, TKey> keyOf)
+        where TKey : notnull
+    {
+        var result = new Dictionary<TKey, List<T>>();
+        foreach (T item in source)
+        {
+            TKey key = keyOf(item);
+            if (!result.TryGetValue(key, out var group))
+            {
+                group = new List<T>();
+                result.Add(key, group);
+            }
+            group.Add(item);
+        }
+        return result;
+    }
+}
+
+sealed record Student(string Name, string Group, int Score)
+{
+    public override string ToString() => $"{Name} ({Group}, {Score})";
+}
+
+static class Students
+{
+    public static List<Student> FromLab6() =>
+    [
+        new Student("Коваленко", "КН-3/1", 88),
+        new Student("Мельник",   "КН-3/2", 64),
+        new Student("Іщенко",    "КН-3/1", 93),
+        new Student("Бондар",    "КН-3/1", 71),
+        new Student("Савченко",  "КН-3/2", 55),
+        new Student("Ткачук",    "КН-3/2", 90),
+        new Student("Кравець",   "КН-3/1", 76),
+        new Student("Іванів",    "КН-3/1", 48),
+        new Student("Мороз",     "КН-3/2", 82),
+        new Student("Шевчук",    "КН-3/1", 67),
+        new Student("Бойко",     "КН-3/2", 95),
+        new Student("Кушнір",    "КН-3/2", 73),
+    ];
 }

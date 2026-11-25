@@ -1,3 +1,6 @@
+#:property PublishAot=false
+
+using System.Diagnostics;
 using System.Globalization;
 using static Search;
 
@@ -107,4 +110,174 @@ static string[] MakeQueries(string[] values, int count)
     for (int i = 0; i < count; i++)
         result[i] = values[random.Next(values.Length)];
     return result;
+}
+
+static class Broken
+{
+    public static int SkipLast<T>(T[] values, T target, Func<T, T, int> cmp)
+    {
+        int lo = 0, hi = values.Length - 1;
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            int order = cmp(values[mid], target);
+            if (order == 0)
+                return mid;
+            if (order < 0)
+                lo = mid + 1;
+            else
+                hi = mid - 1;
+        }
+        return -1;
+    }
+
+    public static (int Lo, int Hi) Stuck<T>(T[] values, T target, Func<T, T, int> cmp)
+    {
+        int lo = 0, hi = values.Length - 1;
+        for (int step = 0; lo <= hi && step < 10; step++)
+        {
+            int mid = lo + (hi - lo) / 2;
+            int order = cmp(values[mid], target);
+            if (order == 0)
+                return (mid, mid);
+            if (order < 0)
+                lo = mid;
+            else
+                hi = mid - 1;
+        }
+        return (lo, hi);
+    }
+
+    public static int OverflowingMidpoint(int lo, int hi) => unchecked((lo + hi) / 2);
+
+    public static int SearchUnsorted<T>(T[] values, T target, Func<T, T, int> cmp) =>
+        Search.BinarySearch(values, target, cmp, out _);
+}
+
+static class Measurements
+{
+    public static void Run(Func<string[], int, string[]> makeQueries, Func<int, string[]> makeValues,
+        Func<string, string, int> cmp)
+    {
+        Console.WriteLine("| n | Лінійний | Бінарний | Відношення | n / 2 та log₂ n |");
+        Console.WriteLine("|---:|---:|---:|---:|---:|");
+        foreach (int size in new[] { 1000, 10000, 100000, 1000000 })
+        {
+            var values = makeValues(size);
+            var sorted = (string[])values.Clone();
+            Array.Sort(sorted, (x, y) => cmp(x, y));
+            int linear = 0, binary = 0;
+            foreach (var target in makeQueries(values, 100))
+            {
+                Search.LinearSearch(values, target, cmp, out int a);
+                Search.BinarySearch(sorted, target, cmp, out int b);
+                linear += a;
+                binary += b;
+            }
+            Console.WriteLine($"| {size} | {linear / 100d:F2} | {binary / 100d:F2} | {(double)linear / binary:F2} | {size / 2} / {Math.Ceiling(Math.Log2(size))} |");
+        }
+
+        var original = makeValues(100000);
+        Console.WriteLine();
+        Console.WriteLine("| q | Лінійно, мс | Сортування й бінарно, мс | Швидше |");
+        Console.WriteLine("|---:|---:|---:|---|");
+        int first = 0;
+        foreach (int q in new[] { 1, 5, 10, 20, 30, 50, 100, 200, 400, 800, 1600 })
+        {
+            var queries = makeQueries(original, q);
+            double linear = Measure(() =>
+            {
+                foreach (var target in queries)
+                    Search.LinearSearch(original, target, cmp, out _);
+            });
+            double sorted = Measure(() =>
+            {
+                var copy = (string[])original.Clone();
+                Array.Sort(copy, (x, y) => cmp(x, y));
+                foreach (var target in queries)
+                    Search.BinarySearch(copy, target, cmp, out _);
+            });
+            if (first == 0 && sorted < linear)
+                first = q;
+            Console.WriteLine($"| {q} | {linear:F3} | {sorted:F3} | {(sorted < linear ? "сортування" : "лінійно")} |");
+        }
+
+        Console.WriteLine(first == 0
+            ? "На перевірених q до 1600 точку окупності не досягнуто."
+            : $"Перша перевага сортування серед виміряних точок: q = {first}.");
+    }
+
+    private static double Measure(Action run)
+    {
+        run();
+        double best = double.PositiveInfinity;
+        for (int i = 0; i < 3; i++)
+        {
+            var timer = Stopwatch.StartNew();
+            run();
+            timer.Stop();
+            best = Math.Min(best, timer.Elapsed.TotalMilliseconds);
+        }
+        return best;
+    }
+}
+
+static class Search
+{
+    public static int LinearSearch<T>(T[] values, T target, Func<T, T, int> cmp, out int comparisons)
+    {
+        comparisons = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            comparisons++;
+            if (cmp(values[i], target) == 0)
+                return i;
+        }
+        return -1;
+    }
+
+    public static int BinarySearch<T>(T[] values, T target, Func<T, T, int> cmp, out int comparisons)
+    {
+        comparisons = 0;
+        int lo = 0, hi = values.Length - 1;
+        while (lo <= hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            int order = cmp(values[mid], target);
+            comparisons++;
+            if (order == 0)
+                return mid;
+            if (order < 0)
+                lo = mid + 1;
+            else
+                hi = mid - 1;
+        }
+        return -1;
+    }
+
+    public static int Boundary<T>(T[] values, Func<T, bool> predicate, out int comparisons)
+    {
+        comparisons = 0;
+        int lo = 0, hi = values.Length;
+        while (lo < hi)
+        {
+            int mid = lo + (hi - lo) / 2;
+            comparisons++;
+            if (predicate(values[mid]))
+                hi = mid;
+            else
+                lo = mid + 1;
+        }
+        return lo;
+    }
+
+    public static int BinaryWithoutEquality<T>(T[] values, T target, Func<T, T, int> cmp,
+        out int comparisons)
+    {
+        int pos = Boundary(values, value => cmp(value, target) >= 0, out comparisons);
+        if (pos == values.Length)
+            return -1;
+        comparisons++;
+        return cmp(values[pos], target) == 0 ? pos : -1;
+    }
 }

@@ -1,3 +1,6 @@
+#:property PublishAot=false
+
+using System.Diagnostics;
 using System.Globalization;
 
 CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
@@ -177,3 +180,206 @@ static void EnumerableSort(Student[] array, Func<Student, Student, int> cmp,
     comparisons = moves = 0;
 }
 
+static class Checks
+{
+    public static bool IsSorted<T>(T[] values, Func<T, T, int> cmp)
+    {
+        for (int i = 1; i < values.Length; i++)
+            if (cmp(values[i - 1], values[i]) > 0)
+                return false;
+        return true;
+    }
+
+    public static bool IsPermutationOf<T>(T[] actual, T[] source) where T : notnull
+    {
+        if (actual.Length != source.Length)
+            return false;
+        var counts = new Dictionary<T, int>();
+        foreach (var item in source)
+        {
+            counts.TryGetValue(item, out int count);
+            counts[item] = count + 1;
+        }
+        foreach (var item in actual)
+        {
+            if (!counts.TryGetValue(item, out int count) || count == 0)
+                return false;
+            counts[item] = count - 1;
+        }
+        return true;
+    }
+
+    public static void Validate<T>(T[] actual, T[] source, Func<T, T, int> cmp) where T : notnull
+    {
+        if (!IsSorted(actual, cmp) || !IsPermutationOf(actual, source))
+            throw new InvalidOperationException("Результат сортування некоректний.");
+    }
+}
+
+delegate void Sort<T>(T[] values, Func<T, T, int> cmp, out int comparisons, out int moves);
+
+static class Measurements
+{
+    public static double Measure<T>(T[] source, Func<T, T, int> cmp, Sort<T> sort) where T : notnull
+    {
+        T[] copy = (T[])source.Clone();
+        sort(copy, cmp, out _, out _);
+        Checks.Validate(copy, source, cmp);
+
+        double best = double.PositiveInfinity;
+        for (int i = 0; i < 3; i++)
+        {
+            copy = (T[])source.Clone();
+            var stopwatch = Stopwatch.StartNew();
+            sort(copy, cmp, out _, out _);
+            stopwatch.Stop();
+            best = Math.Min(best, stopwatch.Elapsed.TotalMilliseconds);
+            Checks.Validate(copy, source, cmp);
+        }
+        return best;
+    }
+}
+
+static class Sorts
+{
+    public static void Insertion<T>(T[] values, Func<T, T, int> cmp, out int comparisons, out int moves)
+    {
+        long checkedPairs = 0, writes = 0;
+        for (int i = 1; i < values.Length; i++)
+        {
+            T item = values[i];
+            int pos = i;
+            while (pos > 0)
+            {
+                checkedPairs++;
+                if (cmp(values[pos - 1], item) <= 0)
+                    break;
+                values[pos] = values[pos - 1];
+                writes++;
+                pos--;
+            }
+            if (pos != i)
+            {
+                values[pos] = item;
+                writes++;
+            }
+        }
+        comparisons = Counter(checkedPairs);
+        moves = Counter(writes);
+    }
+
+    public static void BinaryInsertion<T>(T[] values, Func<T, T, int> cmp, out int comparisons, out int moves)
+    {
+        long checkedPairs = 0, writes = 0;
+        for (int i = 1; i < values.Length; i++)
+        {
+            T item = values[i];
+            int lo = 0, hi = i;
+            while (lo < hi)
+            {
+                int mid = lo + (hi - lo) / 2;
+                checkedPairs++;
+                if (cmp(values[mid], item) <= 0)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            if (lo != i)
+            {
+                Array.Copy(values, lo, values, lo + 1, i - lo);
+                values[lo] = item;
+                writes += i - lo + 1;
+            }
+        }
+        comparisons = Counter(checkedPairs);
+        moves = Counter(writes);
+    }
+
+    public static void Quick<T>(T[] values, Func<T, T, int> cmp, out int comparisons, out int moves)
+    {
+        long checkedPairs = 0, writes = 0;
+        SortRange(0, values.Length - 1);
+        comparisons = Counter(checkedPairs);
+        moves = Counter(writes);
+
+        void SortRange(int first, int last)
+        {
+            while (first < last)
+            {
+                int middle = first + (last - first) / 2;
+                int pivotIndex = MedianIndex(first, middle, last);
+                T pivot = values[pivotIndex];
+                Swap(pivotIndex, last);
+                int next = first;
+                for (int i = first; i < last; i++)
+                    if (Compare(values[i], pivot) < 0)
+                        Swap(next++, i);
+                Swap(next, last);
+
+                // Process the shorter side recursively to limit stack usage.
+                if (next - first < last - next)
+                {
+                    SortRange(first, next - 1);
+                    first = next + 1;
+                }
+                else
+                {
+                    SortRange(next + 1, last);
+                    last = next - 1;
+                }
+            }
+        }
+
+        int MedianIndex(int left, int middle, int right)
+        {
+            if (Compare(values[left], values[middle]) > 0)
+                (left, middle) = (middle, left);
+            if (Compare(values[middle], values[right]) > 0)
+                (middle, right) = (right, middle);
+            if (Compare(values[left], values[middle]) > 0)
+                middle = left;
+            return middle;
+        }
+
+        int Compare(T left, T right)
+        {
+            checkedPairs++;
+            return cmp(left, right);
+        }
+
+        void Swap(int left, int right)
+        {
+            if (left == right)
+                return;
+            (values[left], values[right]) = (values[right], values[left]);
+            writes += 2;
+        }
+    }
+
+    // A negative sentinel marks measurements too large for the assignment's out int signature.
+    private static int Counter(long value) => value <= int.MaxValue ? (int)value : -1;
+}
+
+sealed record Student(string Name, string Group, int Score)
+{
+    public override string ToString() => $"{Name} ({Group}, {Score})";
+}
+
+static class Students
+{
+    public static List<Student> FromLab6() =>
+    [
+        new Student("Коваленко", "КН-3/1", 88),
+        new Student("Мельник",   "КН-3/2", 64),
+        new Student("Іщенко",    "КН-3/1", 93),
+        new Student("Бондар",    "КН-3/1", 71),
+        new Student("Савченко",  "КН-3/2", 55),
+        new Student("Ткачук",    "КН-3/2", 90),
+        new Student("Кравець",   "КН-3/1", 76),
+        new Student("Іванів",    "КН-3/1", 48),
+        new Student("Мороз",     "КН-3/2", 82),
+        new Student("Шевчук",    "КН-3/1", 67),
+        new Student("Бойко",     "КН-3/2", 95),
+        new Student("Кушнір",    "КН-3/2", 73),
+    ];
+}
